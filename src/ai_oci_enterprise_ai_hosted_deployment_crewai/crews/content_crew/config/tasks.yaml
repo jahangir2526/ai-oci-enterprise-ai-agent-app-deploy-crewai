@@ -1,0 +1,20 @@
+draft_answer:
+  description: >
+    Answer this user question: {question}
+
+    Reason from your existing knowledge only. Do not claim to browse, call
+    tools, access private systems, or know live facts. Prefer a short practical
+    answer, and state important uncertainty when relevant.
+  expected_output: >
+    A direct draft answer containing only information useful to the user.
+  agent: solution_scout
+
+review_answer:
+  description: >
+    Review the draft answer to this question: {question}
+
+    Correct unsupported claims, fill only essential gaps, and improve clarity.
+    Return the answer itself—not review notes, process commentary, or labels.
+  expected_output: >
+    A polished, self-contained final answer, normally under 250 words.
+  agent: clarity_editor
