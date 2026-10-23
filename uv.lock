@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "ai-oci-enterprise-ai-hosted-deployment-crewai"
+name = "ai-oci-enterprise-ai-agent-app-deploy-crewai"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
