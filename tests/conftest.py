@@ -1,6 +1,14 @@
 import os
+import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+
+# Keep deterministic local tests from exporting telemetry or prompting for traces.
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_TRACING_ENABLED"] = "false"
 
 
 # CrewAI initializes its internal app-data directory during import. Keep that

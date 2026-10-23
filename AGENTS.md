@@ -60,7 +60,8 @@ These snake_case flags still work but are hidden from `--help`. Prefer kebab-cas
 1. You ran the version check and docs lookup steps above before writing code
 2. All LLM references use `crewai.LLM` or string shorthand (`"openai/gpt-4o"`)
 3. All tool imports come from `crewai.tools` or `crewai_tools`
-4. Crew classes use `@CrewBase` decorator with YAML config files
+4. This project's classic crew classes use `@CrewBase` with YAML config files.
+   Current CLI scaffolding defaults to JSON; use `--classic` for Python/YAML.
 5. Python >=3.10, <3.14
 6. Code matches the API from the live docs, not just this file
 
@@ -153,7 +154,7 @@ uv sync                   # Sync dependencies
 uv lock                   # Lock dependencies
 
 # Project scaffolding
-crewai create crew <name> --skip-provider       # New crew project
+crewai create crew <name> --classic --skip-provider  # New Python/YAML crew project
 crewai create flow <name>                       # New flow project
 crewai create tool <handle>                     # Custom tool repository
 crewai create skill <name>                      # Agent skill (./skills/ in crew projects)
@@ -1167,7 +1168,7 @@ Python >=3.10, <3.14
 ```bash
 uv tool install crewai        # Install CrewAI CLI
 uv tool list                  # Verify installation
-crewai create crew my_crew --skip-provider   # Scaffold a crew project
+crewai create crew my_crew --classic --skip-provider  # Scaffold a Python/YAML crew
 crewai create tool my_tool                   # Scaffold a tool repository
 crewai create skill my_skill                 # Scaffold an agent skill
 crewai install                # Install project dependencies

@@ -38,19 +38,19 @@ def answer_question(question: str) -> str:
     return result.raw
 
 
-@app.get("/health", include_in_schema=False)
+@app.get("/health")
 def health() -> Response:
     """OCI liveness probe."""
     return Response(status_code=200, media_type="application/json")
 
 
-@app.get("/ready", include_in_schema=False)
+@app.get("/ready")
 def ready() -> Response:
     """OCI readiness probe."""
     return Response(status_code=200, media_type="application/json")
 
 
-@app.post("/invoke", response_model=AnswerResponse)
+@app.post("/chat", response_model=AnswerResponse)
 async def invoke(
     payload: QuestionRequest,
     accept: Annotated[str | None, Header()] = None,
@@ -70,12 +70,12 @@ def root() -> dict[str, str]:
     """Small discovery response for a live demo."""
     return {
         "name": "CrewAI Answer Studio",
-        "usage": "POST /invoke with JSON: {\"question\": \"Why is the sky blue?\"}",
+        "usage": "POST /chat with JSON: {\"question\": \"Why is the sky blue?\"}",
     }
 
 
 def run() -> None:
-    """Run the service locally through the ``serve`` project command."""
+    """Run the API server on the OCI-required host and port."""
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8080)

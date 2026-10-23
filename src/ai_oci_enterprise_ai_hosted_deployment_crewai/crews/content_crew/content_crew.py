@@ -42,11 +42,9 @@ class AnswerCrew:
         return Agent(
             config=self.agents_config["solution_scout"],  # type: ignore[index]
             llm=self._llm(),
-            tools=[],
             memory=False,
             cache=False,
             max_iter=2,
-            verbose=False,
         )
 
     @agent
@@ -54,11 +52,9 @@ class AnswerCrew:
         return Agent(
             config=self.agents_config["clarity_editor"],  # type: ignore[index]
             llm=self._llm(),
-            tools=[],
             memory=False,
             cache=False,
             max_iter=2,
-            verbose=False,
         )
 
     @task
@@ -82,5 +78,4 @@ class AnswerCrew:
             process=Process.sequential,
             memory=False,
             cache=False,
-            verbose=False,
         )

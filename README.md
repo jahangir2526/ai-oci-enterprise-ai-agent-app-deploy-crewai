@@ -1,197 +1,222 @@
-# OCI Generative AI Hosted Deployment — Minimal CrewAI Multi-Agent Responses Agent
+# OCI Hosted Deployment — Minimal CrewAI Multi-Agent
 
-This is a minimal, stateless FastAPI and CrewAI multi-agent service for an
-**existing** OCI Generative AI hosted application. It follows the API-key
-authentication pattern in `sample.py` and calls OCI's OpenAI-compatible
-Responses API. A **Solution Scout** drafts the answer and a **Clarity Editor**
-reviews it before the service returns the final response.
+A stateless FastAPI service that runs a two-agent CrewAI workflow against OCI Generative AI's OpenAI-compatible Responses API. OCI hosts the container and generates the answers. A **Solution Scout** drafts an answer, then a **Clarity Editor** reviews it. Each request creates a fresh crew, with no stored conversation history. The agents have no tools or live-data access.
 
-## OCI requirement checklist
+## Service and files
 
-| OCI requirement | Implementation |
-| ----------------------------- | -------------------------------------------------------- |
-| HTTP service | FastAPI `POST /invoke` |
-| Host and port | Uvicorn listens on `0.0.0.0:8080` |
-| Readiness probe | `GET /ready` returns `200` |
-| Liveness probe | `GET /health` returns `200` |
-| Normal response | JSON response from `POST /invoke` |
-| Streaming response | One completed SSE event when `Accept: text/event-stream` is supplied |
-| Supported image architecture | Build with `--platform linux/amd64` |
-| Image entry command | Defined by `CMD` in `Dockerfile` |
-| Container writes | The crew is stateless; CrewAI internal mutable state is directed to `/tmp` |
-
-## Files
+| Item | Implementation |
+| --- | --- |
+| API | `POST /chat` with `{"question":"..."}`; JSON answer in `answer` |
+| SSE | `Accept: text/event-stream` returns one data event after both agents finish |
+| Readiness | `GET /ready`: `200` when the HTTP service is running |
+| Liveness | `GET /health`: `200` |
+| Probes | Empty body, `Content-Type: application/json`; no model call or credential validation |
+| Runtime | Uvicorn on `0.0.0.0:8080`; entry command defined in the Dockerfile |
+| Container | `python:3.13-slim`, Linux x86_64 (`linux/amd64`), non-root UID 1000 |
+| Filesystem | CrewAI application data uses `/tmp/crewai`; its internal credential-store key is prepared at image build time |
 
 | File | Purpose |
-| ------------------------------ | ------------------------------------------------------- |
-| `sample.py` | Supplied working OCI API-key reference code |
-| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/main.py` | Hosted FastAPI service |
-| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/crews/content_crew/content_crew.py` | Two-agent CrewAI orchestration |
-| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/crews/content_crew/config/agents.yaml` | Solution Scout and Clarity Editor definitions |
-| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/crews/content_crew/config/tasks.yaml` | Draft and review task definitions |
-| `requirements.txt` | Runtime dependencies |
-| `Dockerfile` | OCI-compatible container image |
-| `.dockerignore` | Prevents credentials and local files entering the image |
+| --- | --- |
+| `main.py` | Local launcher for `python main.py` |
+| `requirements.txt` | Direct runtime dependencies |
+| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/main.py` | HTTP API, probes, JSON/SSE responses, and local entry point |
+| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/crews/content_crew/content_crew.py` | Two-agent orchestration and OCI Responses API configuration |
+| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/crews/content_crew/config/agents.yaml` | Solution Scout and Clarity Editor roles |
+| `src/ai_oci_enterprise_ai_hosted_deployment_crewai/crews/content_crew/config/tasks.yaml` | Draft and review instructions |
+| `Dockerfile`, `.dockerignore` | Image definition and build-context exclusions |
 | `.env.example` | Local configuration template |
+| `tests/test_api.py`, `tests/conftest.py` | Probe, validation, JSON/SSE, crew workflow, and OCI configuration checks |
 
-## 1. Obtain the OCI Generative AI API key
+## 1. Configure the OCI Generative AI API key
 
-Create an OCI Generative AI API key for the Generative AI project used by this
-crew and give the key only the permissions it needs. Keep the key secret.
-
-The deployment needs these variables:
-
-```text
-OCI_REGION=us-ashburn-1
-OCI_GENAI_PROJECT_OCID=ocid1.generativeaiproject.oc1.<region>.<unique-id>
-OCI_GENAI_API_KEY=<oci-generative-ai-api-key>
-OCI_CHAT_MODEL=xai.grok-4.3
-```
-
-`OCI_CHAT_MODEL` is optional and defaults to `xai.grok-4.3`. `OCI_REGION`
-defaults to `us-ashburn-1`. Use a model available to the specified project and
-region. Do not place `OCI_GENAI_API_KEY` in source code, an image tag, the
-Dockerfile, or a Docker build argument. Store the API-key value in your approved
-secrets manager and enter it only through the application's protected
-configuration workflow.
-
-For local testing, copy the template and replace its placeholders:
+Create a Generative AI API key for the OCI project used by the crew, then copy the template (or edit your existing `.env`):
 
 ```bash
 cp .env.example .env
 ```
 
-The real `.env` file is excluded from Git and from the container image.
-
-## 2. Build the amd64 container image
-
-OCI Hosted Deployments accept `linux/amd64` images. From this directory:
-
-```bash
-docker buildx build \
-  --platform linux/amd64 \
-  --load \
-  -t crewai-answer-studio:v1 .
+```dotenv
+OCI_REGION=us-ashburn-1
+OCI_GENAI_PROJECT_OCID=ocid1.generativeaiproject.oc1.<region>.<unique-id>
+OCI_GENAI_API_KEY=your-oci-generative-ai-api-key
+OCI_CHAT_MODEL=xai.grok-4.3
 ```
 
-The image uses Oracle Linux 9 Slim, runs as a non-root user, and starts the
-service on `0.0.0.0:8080` through the Dockerfile `CMD`.
+`OCI_GENAI_API_KEY` and `OCI_GENAI_PROJECT_OCID` are required to answer questions. `OCI_REGION` defaults to `us-ashburn-1`; `OCI_CHAT_MODEL` defaults to `xai.grok-4.3`. Choose a model available to the specified project and region. Local `.env` values do not override existing environment variables.
 
-## 3. Test the container locally
+The real `.env` is excluded from Git and the image. Supply credentials at runtime, keeping them out of source code, build arguments, and image tags. Probe success confirms that the HTTP service is running; it does not confirm that the model or API key works.
 
-Run the image by passing configuration at runtime. Substitute actual values
-only in your local `.env`; never add the key to a command history shared with
-others.
+For `docker run --env-file .env`, use unquoted values such as
+`OCI_GENAI_API_KEY=your-key`. Surrounding quotes become part of the value passed
+to the container and can cause OCI authentication errors. After editing `.env`,
+recreate the container; restarting an existing container keeps its old environment.
+
+### Optional: run locally without Docker
+
+With Python 3.13, from the project root:
+
+CrewAI does not support Python 3.14 in this version. An existing `.venv` keeps
+the Python version it was created with. If it uses 3.14, deactivate it and
+rename it as a backup before creating the Python 3.13 environment below.
 
 ```bash
-docker run --rm \
-  -p 8080:8080 \
-  --env-file .env \
-  crewai-answer-studio:v1
+python3.13 -m venv .venv
+source .venv/bin/activate
+python --version  # Must report Python 3.13.x
+python -m pip install -r requirements.txt
+python main.py
 ```
 
-In another terminal, check OCI's required probes:
+In another terminal:
 
 ```bash
 curl -i http://localhost:8080/ready
 curl -i http://localhost:8080/health
-```
 
-Make a standard JSON request:
-
-```bash
-curl -sS -X POST http://localhost:8080/invoke \
+curl -sS -X POST http://localhost:8080/chat \
   -H 'Content-Type: application/json' \
-  -d '{"question":"What is OCI Generative AI?"}'
+  -d '{"question":"What is the capital of Spain?"}'
 ```
 
-Request a Server-Sent Events response:
+Interactive API documentation: <http://localhost:8080/docs>.
+
+For automated checks, use the activated environment:
 
 ```bash
-curl -N -X POST http://localhost:8080/invoke \
+python -m pip install 'pytest>=8,<9'
+python -m pytest -q
+```
+
+Tests use stub model responses, disable telemetry and tracing, and do not call OCI.
+
+## 2. Docker | Build the container
+
+```bash
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+  --load -t crewai-answer-studio:v1 .
+```
+
+The build disables provenance and SBOM attestations for this example. Omit those two flags if your image publication workflow requires attestations. See [Docker build attestations](https://docs.docker.com/build/metadata/attestations/).
+
+The official Python Slim base includes Python 3.13 and pip, so the Dockerfile does not install a separate Python runtime or run an OS package update. Dependencies are installed with `python -m pip install -r requirements.txt`; the application source and YAML configuration are copied into the image. The entry command is `python main.py`. CrewAI brings its own transitive dependencies, so the complete image is larger than the base image alone.
+
+Keep direct dependency versions in `requirements.txt`. Both local development and Docker use this file; uv and a package installation of this project are not required. After dependency changes, reinstall, test, and rebuild the image. Docker can reuse its dependency layer when only application code changes.
+
+The image runs as a non-root user, disables bytecode writes and pip caching, and directs CrewAI application data to `/tmp`. Its build-time internal credential-store key is separate from your OCI API key. OCI uses the HTTP probes; no Docker `HEALTHCHECK` or persistent conversation storage is needed.
+
+## 3. Docker | Test locally
+
+```bash
+docker run --rm -p 8080:8080 --env-file .env crewai-answer-studio:v1
+```
+
+In another terminal:
+
+```bash
+curl -i http://localhost:8080/ready
+curl -i http://localhost:8080/health
+
+curl -sS -X POST http://localhost:8080/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What is the capital of Malaysia?"}'
+```
+
+Example answer (wording may vary):
+
+```json
+{"answer":"The capital of Malaysia is Kuala Lumpur."}
+```
+
+For SSE:
+
+```bash
+curl -N -X POST http://localhost:8080/chat \
   -H 'Content-Type: application/json' \
   -H 'Accept: text/event-stream' \
-  -d '{"question":"Explain OCI in one paragraph."}'
+  -d '{"question":"What is the capital of Bhutan?"}'
 ```
 
-This minimal implementation completes the two CrewAI tasks first and then
-returns the final answer as one SSE event; it does not stream intermediate agent
-tokens.
+```text
+data: {"answer": "The capital of Bhutan is Thimphu."}
+
+```
+
+JSON and SSE return the same reviewed answer. SSE sends the full answer as one data event after generation, without intermediate agent tokens or a named `completed` event. Questions must contain between 1 and 4,000 characters; missing, empty, or overlong questions return HTTP `422`.
 
 ### Ready-to-use sample prompts
 
-Use any of these request bodies with the local `curl` command or the deployed
-`oci raw-request` command:
+Use these JSON bodies with local `curl -d` or deployed `oci raw-request --request-body`:
 
-```bash
---request-body '{"question":"Explain vector databases using a coffee shop analogy."}'
-
---request-body '{"question":"Why do multi-agent systems use specialized roles? Give one practical example."}'
-
---request-body '{"question":"Suggest three OCI Generative AI use cases for a regional bank, including the benefit and main risk of each."}'
-
---request-body '{"question":"Compare containers and serverless functions for hosting an AI agent in five concise points."}'
-
---request-body '{"question":"Create a troubleshooting checklist for an AI API that has suddenly become slow."}'
-
---request-body '{"question":"Write a 60-second executive explanation of why reviewed AI answers can be more reliable than a single model response."}'
+```json
+{"question":"Explain vector databases using a coffee shop analogy."}
+{"question":"Why do multi-agent systems use specialized roles? Give one practical example."}
+{"question":"Suggest three OCI Generative AI use cases for a regional bank, including the benefit and main risk of each."}
+{"question":"Compare containers and serverless functions for hosting an AI agent in five concise points."}
 ```
 
-For `curl`, place the selected JSON value after `-d` instead of using the
-`--request-body` option.
+Send one JSON object per request.
 
-## 4. Push the image to Oracle Container Registry
+## 4. Push to Oracle Container Registry
 
-Replace the placeholders with the registry region key, tenancy namespace,
-repository, and tag:
+Create a repository in OCI Console, for example `repo-oci-crewai-agent`, then replace the registry, namespace, and repository placeholders:
 
 ```bash
 docker login <region-key>.ocir.io
-docker tag crewai-answer-studio:v1 \
-  <region-key>.ocir.io/<tenancy-namespace>/<repository>:v1
+docker tag crewai-answer-studio:v1 <region-key>.ocir.io/<tenancy-namespace>/<repository>:v1
 docker push <region-key>.ocir.io/<tenancy-namespace>/<repository>:v1
 ```
 
-For the Ashburn region, the registry host is `iad.ocir.io`. If the target
-registry is in another region, use that region's OCIR key.
+For Ashburn, use `iad.ocir.io`. Example image path: `iad.ocir.io/<tenancy-namespace>/repo-oci-crewai-agent:v1`. Supply the Generative AI API key separately at runtime.
 
-## 5. Create a deployment for the existing application
+## 5. Deploy and invoke on OCI
 
-1. In OCI Console, go to **Generative AI > Applications** and select the
-   existing application.
-2. Open **Deployments** and create a deployment using the OCIR image pushed in
-   step 4.
-3. In the application **Environment** section, add `OCI_REGION`,
-   `OCI_GENAI_PROJECT_OCID`, `OCI_GENAI_API_KEY`, and optionally
-   `OCI_CHAT_MODEL` as environment-variable key/value pairs. Enter the API-key
-   value from your approved secrets manager; do not commit it to this
-   repository.
-4. Verify that the deployment has outbound network access to the OCI Generative
-   AI inference endpoint. The default service-managed network provides public
-   egress.
-5. Create the deployment and wait until its lifecycle state is **Active**. OCI
-   calls `/ready` before sending traffic and monitors `/health`.
-6. Copy the application endpoint, append `/invoke`, and invoke it using the
-   inbound authentication configured for the existing application:
+1. In **Generative AI > Applications**, select an existing application or create one.
+2. In the application's environment configuration, set `OCI_GENAI_API_KEY`, `OCI_GENAI_PROJECT_OCID`, `OCI_REGION`, and optionally `OCI_CHAT_MODEL`.
+3. Create a deployment using the OCIR image from section 4.
+4. Allow outbound HTTPS to `inference.generativeai.<region>.oci.oraclecloud.com`, use port `8080`, and confirm `/ready` and `/health` succeed.
+5. Wait for the deployment to become active. Copy the Console-provided application endpoint and append `/chat`; the final path ends in `/actions/invoke/chat`.
 
-   ```bash
-   oci raw-request \
-     --profile DEFAULT \
-     --auth api_key \
-     --http-method POST \
-     --target-uri '<deployment-endpoint>/invoke' \
-     --request-headers '{"content-type":"application/json"}' \
-     --request-body '{"question":"What is the capital of Bhutan?"}'
-   ```
+Match requests to the application's authentication setting. Use the Console endpoint without changing its resource type. [OCI invocation guidance](https://docs.oracle.com/en-us/iaas/Content/generative-ai/use-applications.htm) explains the supported authentication methods.
 
-   Replace the value passed to `--request-body` with any example from
-   **Ready-to-use sample prompts** in section 3, or supply your own question
-   using the same `{"question":"..."}` JSON structure.
+### 5.1 Test
 
-OCI provisions an endpoint for the active deployment. Its console-provided base
-URL is authoritative; append the agent route `/invoke` to that base URL.
+The Console application endpoint ends in `/actions/invoke`. Append the container route: `/health`, `/ready`, or `/chat`.
+
+#### 5.1.1 No authentication
+
+If the application has **Authentication type: No Authentication**:
+
+```bash
+curl -i '<console-application-endpoint-ending-in-actions/invoke>/health'
+
+curl -N -X POST '<console-application-endpoint-ending-in-actions/invoke>/chat' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -d '{"question":"What is the capital of Luxembourg?"}'
+```
+
+#### 5.1.2 OCI IAM authentication
+
+For an OCI IAM application with API-key request signing:
+
+```bash
+oci raw-request \
+  --profile DEFAULT \
+  --auth api_key \
+  --http-method POST \
+  --target-uri '<console-application-endpoint-ending-in-actions/invoke>/chat' \
+  --request-headers '{"content-type":"application/json"}' \
+  --request-body '{"question":"What is the capital of Bangladesh?"}'
+```
+
+OCI IAM endpoints contain `hostedApplicationsIam`. Identity-domain bearer-token endpoints contain `hostedApplications`; use a valid OAuth bearer token for those requests. Inbound application authentication is separate from the outbound `OCI_GENAI_API_KEY` used for model calls.
+
+**HTTP 404 (`{"detail":"Not Found"}`):** check that the request URL ends in `/actions/invoke/chat`. After changing a route, rebuild, push a new image tag, and activate its deployment. The deployed `/actions/invoke/docs` route shows the API schema, subject to the application's authentication settings.
 
 ## References
 
-- [Preparing Container Images](https://docs.oracle.com/en-us/iaas/Content/generative-ai/prepare-artifacts.htm)
-- [Hosted Applications and Deployments](https://docs.oracle.com/en-us/iaas/Content/generative-ai/applications-deployments.htm)
+- [CrewAI documentation](https://docs.crewai.com/)
+- [Official Python container image](https://hub.docker.com/_/python)
+- [OCI container requirements](https://docs.oracle.com/en-us/iaas/Content/generative-ai/prepare-artifacts.htm)
+- [OCI hosted applications and deployments](https://docs.oracle.com/en-us/iaas/Content/generative-ai/applications-deployments.htm)
+- [OCI application invocation](https://docs.oracle.com/en-us/iaas/Content/generative-ai/use-applications.htm)
